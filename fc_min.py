@@ -61,14 +61,22 @@ tool_call = msg["tool_calls"][0]
 func_name = tool_call["function"]["name"]
 args = json.loads(tool_call["function"]["arguments"])   # 字符串 → 字典
 
+TOOL_MAP = {
+    "get_time": get_time,
+    "get_date": get_date
+}
 # ===== ④ 你的代码真的执行它 =====
 # 原来是：result = get_time(**args)
-if func_name == "get_time":
-    result = get_time(**args)
-else:
-    result = get_date(**args)
+def run_tool(func_name,args):
+    func=TOOL_MAP.get(func_name)
+    if not func:
+        return "not tool"
+    return func(**args)
 
+result = run_tool(func_name,args)
 print("\n执行结果：", result)
+
+
 
 # ===== ⑤ 把结果端回给模型，让它说人话 =====
 messages.append(msg)                                    # 单子必须带上
@@ -80,7 +88,25 @@ messages.append({
 
 r2 = requests.post("https://api.deepseek.com/chat/completions",
     headers={"Authorization": f"Bearer {os.getenv('DEEPSEEK_API_KEY')}"},
-    json={"model": "deepseek-chat", "messages": messages},
+    json={"model": "deepseek-chat", "messages": messages,"stream":True},
+    stream=True,
     timeout=60)
+    
+print("\n最终回答：", end="")
+for line in r2.iter_lines():
+        if not line:
+            continue
+        text = line.decode("utf-8")
+        if not text.startswith("data: "):
+            continue
+        payload = text[6:]
+        if payload == "[DONE]":
+            break
+        data = json.loads(payload)
+        piece = (data["choices"][0].get("delta") or {}).get("content")
+        if piece:
+            print(piece, end="", flush=True)
+        
 
-print("\n最终回答：", r2.json()["choices"][0]["message"]["content"])
+
+
