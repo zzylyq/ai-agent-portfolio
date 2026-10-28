@@ -8,6 +8,9 @@ def get_date(city):
     today = datetime.date.today()
     return f"今天是{today.year}年{today.month}月{today.day}日"
 
+def get_weather(city):
+    return f"{city}：晴，26℃"
+
 # ===== 2. 工具清单（给模型看）=====
 tools = [
     {
@@ -33,11 +36,23 @@ tools = [
                 "required": ["city"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+	        "description":"查询当地天气",
+	        "parameters": {
+		        "type":"object",
+		        "properties":{"city":{"type":"string","descrition":"城市名"}},
+	            "required":["city"]
+    }
+    }
     }
 ]
 
 # ===== 3. 登记表 + 分发 =====
-TOOL_MAP = {"get_time": get_time, "get_date": get_date}
+TOOL_MAP = {"get_time": get_time, "get_date": get_date, "get_weather": get_weather}
 
 def run_tool(name, args):
     func = TOOL_MAP.get(name)
