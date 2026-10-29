@@ -29,20 +29,57 @@ def score(query, chunk):
             hit += 1
     return hit
 
+def embed(texts):
+    result = []
+    for t in texts:
+        r = requests.post(
+            "https://open.bigmodel.cn/api/paas/v4/embeddings",
+            headers={"Authorization": f"Bearer {os.getenv('ZHIPU_API_KEY')}"},
+            json={"model": "embedding-3", "input": [t]},
+            timeout=60,
+        )
+        j = r.json()
+        if "data" not in j:
+            print("接口报错：", j)
+            print("出错的那块：", t[:60])
+            raise SystemExit
+        result.append(j["data"][0]["embedding"])
+    return result
+
+
+def cosine(a, b):
+    dot = 0
+    for x, y in zip(a, b):
+        dot += x * y
+    na = 0
+    for x in a:
+        na += x * x
+    nb = 0
+    for y in b:
+        nb += y * y
+    return dot / ((na ** 0.5) * (nb ** 0.5))
+
+
 def retrieve(query, chunks, top_k=2):
+    qv = embed([query])[0]
     scored = []
-    for c in chunks:
-        scored.append((score(query, c), c))
+    for i in range(len(chunks)):
+        s = cosine(qv, KB_VECS[i])
+        scored.append((s, chunks[i]))
     scored.sort(reverse=True)
     return scored[:top_k]
+
 
 # 启动时加载一次知识库
 with open("kb_reimburse.md", "r", encoding="utf-8") as f:
     KB_CHUNKS = split_by_paragraph(f.read())
+    KB_VECS = embed(KB_CHUNKS)                      # ← 新增
+    print("知识库建库完成：", len(KB_VECS), "块")     # ← 新增
+
 
 def search_kb(query):
     hits = retrieve(query, KB_CHUNKS, top_k=2)
-    if not hits or hits[0][0] == 0:
+    if not hits or hits[0][0] < 0.45:
         return "知识库里没有找到相关内容"
     parts = []
     for s, c in hits:
