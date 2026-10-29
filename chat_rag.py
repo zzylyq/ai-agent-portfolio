@@ -91,7 +91,7 @@ tools = [
         "type": "function",
         "function": {
             "name": "search_kb",
-            "description": "检索公司内部制度文档，包含差旅报销标准、住宿标准、餐饮补贴、报销流程等规定。用户询问公司制度、报销、出差相关问题时必须使用",
+            "description": "检索流程等规定。用户询问公司制度、报销、出差相关问题时必须使用",
             "parameters": {
                 "type": "object",
                 "properties": {"query": {"type": "string", "description": "检索关键词，例如：住宿标准"}},
