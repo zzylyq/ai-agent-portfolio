@@ -1,5 +1,8 @@
 import os, json, datetime, requests
 
+from dotenv import load_dotenv      # ← 加
+load_dotenv()                        # ← 加
+
 # ===== 1. 普通工具 =====
 def get_time(city):
     return f"{city}现在是{datetime.datetime.now():%H:%M}"
