@@ -1,4 +1,7 @@
 import os, json, datetime, requests
+from fastapi import FastAPI
+from pydantic import BaseModel
+
 
 from dotenv import load_dotenv      # ← 加
 load_dotenv()                        # ← 加
@@ -208,11 +211,45 @@ def chat(messages):
 
     stream_chat(messages)
 
-# ===== 6. 主循环 =====
-messages = []
-while True:
-    q = input("\n你：")
-    if q == "exit":
-        break
-    messages.append({"role": "user", "content": q})
-    chat(messages)
+# ===== 7. HTTP 接口 =====
+def answer_question(question):
+    msgs = [{"role": "user", "content": question}]
+
+    r = requests.post(
+        "https://api.deepseek.com/chat/completions",
+        headers={"Authorization": f"Bearer {os.getenv('DEEPSEEK_API_KEY')}"},
+        json={"model": "deepseek-chat", "messages": msgs, "tools": tools},
+        timeout=60,
+    )
+    msg = r.json()["choices"][0]["message"]
+    calls = msg.get("tool_calls") or []
+
+    if not calls:
+        return msg.get("content")
+
+    msgs.append(msg)
+    for c in calls:
+        name = c["function"]["name"]
+        args = json.loads(c["function"]["arguments"])
+        result = run_tool(name, args)
+        msgs.append({"role": "tool", "tool_call_id": c["id"], "content": result})
+
+    r2 = requests.post(
+        "https://api.deepseek.com/chat/completions",
+        headers={"Authorization": f"Bearer {os.getenv('DEEPSEEK_API_KEY')}"},
+        json={"model": "deepseek-chat", "messages": msgs},
+        timeout=60,
+    )
+    return r2.json()["choices"][0]["message"]["content"]
+
+
+app = FastAPI(title="星辰科技 AI 助手")
+
+class AskRequest(BaseModel):
+    question: str
+
+@app.post("/chat")
+def chat_api(req: AskRequest):
+    answer = answer_question(req.question)
+    return {"question": req.question, "answer": answer}
+
