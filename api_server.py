@@ -18,7 +18,7 @@ def get_weather(city):
     return f"{city}：晴，26℃"
 
 # ===== 2. 知识库工具的内部零件 =====
-def split_by_paragraph(text):
+def split_by_paragraph(text):#将长文本按空行切成段落列表
     parts = text.split("\n\n")
     result = []
     for p in parts:
@@ -27,7 +27,7 @@ def split_by_paragraph(text):
             result.append(p)
     return result
 
-def score(query, chunk):
+def score(query, chunk):#文本打分，不接向量时使用
     hit = 0
     for i in range(len(query) - 1):
         word = query[i:i+2]
@@ -35,7 +35,7 @@ def score(query, chunk):
             hit += 1
     return hit
 
-def embed(texts):
+def embed(texts):#将文本转化为向量
     result = []
     for t in texts:
         r = requests.post(
@@ -53,7 +53,7 @@ def embed(texts):
     return result
 
 
-def cosine(a, b):
+def cosine(a, b):#计算向量之间的余弦相似度
     dot = 0
     for x, y in zip(a, b):
         dot += x * y
@@ -66,7 +66,7 @@ def cosine(a, b):
     return dot / ((na ** 0.5) * (nb ** 0.5))
 
 
-def retrieve(query, chunks, top_k=2):
+def retrieve(query, chunks, top_k=2):#根据查询向量和知识库向量，返回最相关的的top_k个段落
     qv = embed([query])[0]
     scored = []
     for i in range(len(chunks)):
@@ -83,7 +83,7 @@ with open("kb_reimburse.md", "r", encoding="utf-8") as f:
     print("知识库建库完成：", len(KB_VECS), "块")     # ← 新增
 
 
-def search_kb(query):
+def search_kb(query):#根据查询关键词，返回最相关的知识库段落
     hits = retrieve(query, KB_CHUNKS, top_k=2)
     if not hits or hits[0][0] < 0.45:
         return "知识库里没有找到相关内容"
@@ -252,3 +252,6 @@ class AskRequest(BaseModel):
 def chat_api(req: AskRequest):
     return {"question": req.question, "answer": answer_question(req.question)}
 
+@app.get("/health")
+def health():
+    return {"status": "ok", "service": "ai-assistant"}
