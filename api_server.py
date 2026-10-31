@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # ===== 1. 普通工具 =====
@@ -247,8 +248,18 @@ def chat(messages):
     stream_chat(messages)
 
 # ===== 6. HTTP 接口 =====
+SYSTEM_PROMPT = """你是星辰科技的内部行政助手，负责回答差旅报销等制度问题。
+回答要求：
+1. 用简洁的中文
+2. 可以用 **加粗** 强调关键数字
+3. 不要使用表格、标题、代码块
+4. 资料里没有的信息，直接说不知道"""
+
 async def answer_question(question):
-    msgs = [{"role": "user", "content": question}]
+    msgs = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": question},
+    ]
 
     async with httpx.AsyncClient(timeout=60) as client:
         r = await client.post(
@@ -281,6 +292,7 @@ async def answer_question(question):
 
 
 app = FastAPI(title="星辰科技 AI 助手")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 class AskRequest(BaseModel):
     question: str
