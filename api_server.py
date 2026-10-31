@@ -1,4 +1,15 @@
 import os, json, datetime, requests
+import logging, time
+import httpx
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger("ai")
+
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -76,11 +87,35 @@ def retrieve(query, chunks, top_k=2):#根据查询向量和知识库向量，返
     return scored[:top_k]
 
 
-# 启动时加载一次知识库
-with open("kb_reimburse.md", "r", encoding="utf-8") as f:
-    KB_CHUNKS = split_by_paragraph(f.read())
-    KB_VECS = embed(KB_CHUNKS)                      # ← 新增
-    print("知识库建库完成：", len(KB_VECS), "块")     # ← 新增
+# ===== 启动时加载知识库（带缓存）=====
+CACHE_FILE = "kb_cache.json"
+DOC_FILE = "kb_reimburse.md"
+
+def load_or_build():
+    """有缓存且文档没变就直接读，否则重新建库并写缓存"""
+    doc_mtime = os.path.getmtime(DOC_FILE)
+
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, "r", encoding="utf-8") as f:
+            cache = json.load(f)
+        if cache.get("mtime") == doc_mtime:
+            logger.info(f"命中缓存，直接加载 {len(cache['chunks'])} 块")
+            return cache["chunks"], cache["vecs"]
+        logger.info("文档已修改，缓存失效，准备重建")
+
+    with open(DOC_FILE, "r", encoding="utf-8") as f:
+        chunks = split_by_paragraph(f.read())
+
+    t0 = time.time()
+    vecs = embed(chunks)
+    logger.info(f"建库完成：{len(vecs)} 块，耗时 {round(time.time() - t0, 1)}s")
+
+    with open(CACHE_FILE, "w", encoding="utf-8") as f:
+        json.dump({"mtime": doc_mtime, "chunks": chunks, "vecs": vecs}, f, ensure_ascii=False)
+    logger.info(f"已写入缓存：{CACHE_FILE}")
+    return chunks, vecs
+
+KB_CHUNKS, KB_VECS = load_or_build()
 
 
 def search_kb(query):#根据查询关键词，返回最相关的知识库段落
@@ -212,35 +247,37 @@ def chat(messages):
     stream_chat(messages)
 
 # ===== 6. HTTP 接口 =====
-def answer_question(question):
+async def answer_question(question):
     msgs = [{"role": "user", "content": question}]
 
-    r = requests.post(
-        "https://api.deepseek.com/chat/completions",
-        headers={"Authorization": f"Bearer {os.getenv('DEEPSEEK_API_KEY')}"},
-        json={"model": "deepseek-chat", "messages": msgs, "tools": tools},
-        timeout=60,
-    )
-    msg = r.json()["choices"][0]["message"]
-    calls = msg.get("tool_calls") or []
+    async with httpx.AsyncClient(timeout=60) as client:
+        r = await client.post(
+            "https://api.deepseek.com/chat/completions",
+            headers={"Authorization": f"Bearer {os.getenv('DEEPSEEK_API_KEY')}"},
+            json={"model": "deepseek-chat", "messages": msgs, "tools": tools},
+        )
+        msg = r.json()["choices"][0]["message"]
+        calls = msg.get("tool_calls") or []
 
-    if not calls:
-        return msg.get("content")
+        if not calls:
+            return msg.get("content")
 
-    msgs.append(msg)
-    for c in calls:
-        name = c["function"]["name"]
-        args = json.loads(c["function"]["arguments"])
-        result = run_tool(name, args)
-        msgs.append({"role": "tool", "tool_call_id": c["id"], "content": result})
+        msgs.append(msg)
+        for c in calls:
+            name = c["function"]["name"]
+            args = json.loads(c["function"]["arguments"])
+            result = run_tool(name, args)
+            msgs.append({"role": "tool", "tool_call_id": c["id"], "content": result})
 
-    r2 = requests.post(
-        "https://api.deepseek.com/chat/completions",
-        headers={"Authorization": f"Bearer {os.getenv('DEEPSEEK_API_KEY')}"},
-        json={"model": "deepseek-chat", "messages": msgs},
-        timeout=60,
-    )
-    return r2.json()["choices"][0]["message"]["content"]
+        r2 = await client.post(
+            "https://api.deepseek.com/chat/completions",
+            headers={"Authorization": f"Bearer {os.getenv('DEEPSEEK_API_KEY')}"},
+            json={"model": "deepseek-chat", "messages": msgs},
+        )
+        return r2.json()["choices"][0]["message"]["content"]
+
+
+
 
 
 app = FastAPI(title="星辰科技 AI 助手")
@@ -249,8 +286,16 @@ class AskRequest(BaseModel):
     question: str
 
 @app.post("/chat")
-def chat_api(req: AskRequest):
-    return {"question": req.question, "answer": answer_question(req.question)}
+async def chat_api(req: AskRequest):
+    t0 = time.time()
+    logger.info(f"收到问题：{req.question}")
+
+    answer = await answer_question(req.question)
+
+    cost = round(time.time() - t0, 2)
+    logger.info(f"完成 | 耗时 {cost}s | 答案 {len(answer)} 字")
+    return {"question": req.question, "answer": answer}
+
 
 @app.get("/health")
 def health():

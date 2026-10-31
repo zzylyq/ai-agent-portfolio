@@ -3,3 +3,4 @@ __pycache__/
 .env
 *.key
 demo.json
+kb_cache.json
