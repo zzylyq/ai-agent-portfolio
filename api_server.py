@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -307,6 +308,56 @@ async def chat_api(req: AskRequest):
     cost = round(time.time() - t0, 2)
     logger.info(f"完成 | 耗时 {cost}s | 答案 {len(answer)} 字")
     return {"question": req.question, "answer": answer}
+
+
+@app.post("/chat/stream")
+async def chat_stream(req: AskRequest):
+    """流式接口：边生成边往前端推送（SSE）"""
+    logger.info(f"[stream] 收到问题：{req.question}")
+
+    async def gen():
+        hits = retrieve(req.question, KB_CHUNKS, top_k=2)
+        parts = []
+        for s, c in hits:
+            parts.append(c)
+        context = "\n\n".join(parts)
+
+        prompt = f"""请只根据下面的资料回答问题。资料里没有就说不知道。
+
+【资料】
+{context}
+
+【问题】
+{req.question}"""
+
+        async with httpx.AsyncClient(timeout=60) as client:
+            async with client.stream(
+                "POST",
+                "https://api.deepseek.com/chat/completions",
+                headers={"Authorization": f"Bearer {os.getenv('DEEPSEEK_API_KEY')}"},
+                json={
+                    "model": "deepseek-chat",
+                    "messages": [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "stream": True,
+                },
+            ) as r:
+                async for line in r.aiter_lines():
+                    if not line or not line.startswith("data: "):
+                        continue
+                    payload = line[6:]
+                    if payload == "[DONE]":
+                        break
+                    data = json.loads(payload)
+                    piece = (data["choices"][0].get("delta") or {}).get("content")
+                    if piece:
+                        yield f"data: {json.dumps(piece, ensure_ascii=False)}\n\n"
+
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 @app.get("/health")
