@@ -17,6 +17,8 @@ load_dotenv()
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
+
+from rag_core import split_by_paragraph, score, cosine, rank_by_vectors
 from pydantic import BaseModel
 
 # ===== 1. 普通工具 =====
@@ -31,23 +33,6 @@ def get_weather(city):
     return f"{city}：晴，26℃"
 
 # ===== 2. 知识库工具的内部零件 =====
-def split_by_paragraph(text):#将长文本按空行切成段落列表
-    parts = text.split("\n\n")
-    result = []
-    for p in parts:
-        p = p.strip()
-        if p:
-            result.append(p)
-    return result
-
-def score(query, chunk):#文本打分，不接向量时使用
-    hit = 0
-    for i in range(len(query) - 1):
-        word = query[i:i+2]
-        if word in chunk:
-            hit += 1
-    return hit
-
 def embed(texts):#将文本转化为向量
     result = []
     for t in texts:
@@ -66,27 +51,9 @@ def embed(texts):#将文本转化为向量
     return result
 
 
-def cosine(a, b):#计算向量之间的余弦相似度
-    dot = 0
-    for x, y in zip(a, b):
-        dot += x * y
-    na = 0
-    for x in a:
-        na += x * x
-    nb = 0
-    for y in b:
-        nb += y * y
-    return dot / ((na ** 0.5) * (nb ** 0.5))
-
-
-def retrieve(query, chunks, top_k=2):#根据查询向量和知识库向量，返回最相关的的top_k个段落
+def retrieve(query, chunks, top_k=2):#查问题向量，返回最相关的 top_k 个段落
     qv = embed([query])[0]
-    scored = []
-    for i in range(len(chunks)):
-        s = cosine(qv, KB_VECS[i])
-        scored.append((s, chunks[i]))
-    scored.sort(reverse=True)
-    return scored[:top_k]
+    return rank_by_vectors(qv, chunks, KB_VECS, top_k)
 
 
 # ===== 启动时加载知识库（带缓存）=====
