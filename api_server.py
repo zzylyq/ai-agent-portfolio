@@ -256,11 +256,13 @@ SYSTEM_PROMPT = """你是星辰科技的内部行政助手，负责回答差旅�
 3. 不要使用表格、标题、代码块
 4. 资料里没有的信息，直接说不知道"""
 
-async def answer_question(question):
-    msgs = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": question},
-    ]
+async def answer_question(question, history=None):
+    if history is None:
+        history = []
+
+    msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
+    msgs.extend(history)
+    msgs.append({"role": "user", "content": question})
 
     async with httpx.AsyncClient(timeout=60) as client:
         r = await client.post(
@@ -297,13 +299,14 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 class AskRequest(BaseModel):
     question: str
+    history: list = []
 
 @app.post("/chat")
 async def chat_api(req: AskRequest):
     t0 = time.time()
     logger.info(f"收到问题：{req.question}")
 
-    answer = await answer_question(req.question)
+    answer = await answer_question(req.question, req.history)
 
     cost = round(time.time() - t0, 2)
     logger.info(f"完成 | 耗时 {cost}s | 答案 {len(answer)} 字")
@@ -330,6 +333,10 @@ async def chat_stream(req: AskRequest):
 【问题】
 {req.question}"""
 
+        msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
+        msgs.extend(req.history)
+        msgs.append({"role": "user", "content": prompt})
+
         async with httpx.AsyncClient(timeout=60) as client:
             async with client.stream(
                 "POST",
@@ -337,10 +344,7 @@ async def chat_stream(req: AskRequest):
                 headers={"Authorization": f"Bearer {os.getenv('DEEPSEEK_API_KEY')}"},
                 json={
                     "model": "deepseek-chat",
-                    "messages": [
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt},
-                    ],
+                    "messages": msgs,
                     "stream": True,
                 },
             ) as r:
